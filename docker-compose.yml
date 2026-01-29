@@ -1,0 +1,15 @@
+services:
+  toon-demo:
+    build: .
+    env_file:
+      - .env
+    environment:
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OPENAI_TEMPERATURE=${OPENAI_TEMPERATURE:-0.0}
+      - DEMO_QUESTION=${DEMO_QUESTION:-Nori 사용자 사전은 어떻게 설정하나요?}
+    volumes:
+      - .:/app
+    # command: ["python", "-u", "-W", "always", "examples/05_langchain_dynamic_example.py"]
+    # tail -f 추가
+    command: ["tail", "-f", "/dev/null"]
+

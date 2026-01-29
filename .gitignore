@@ -1,0 +1,257 @@
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ============================================================
+# Virtual Environments
+# ============================================================
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.conda/
+
+# ============================================================
+# 🔒 SECURITY - API Keys, Secrets, Credentials
+# ============================================================
+# 환경 변수 파일 (모든 변형)
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+.env.test
+.env.staging
+*.env
+*.env.local
+
+# API 키 및 비밀번호 파일
+*_key.txt
+*_keys.txt
+*_secret.txt
+*_secrets.txt
+*_password.txt
+*_passwords.txt
+*_token.txt
+*_tokens.txt
+*_credential*.txt
+*_credentials*.txt
+api_keys.txt
+secrets.txt
+credentials.txt
+config.local.py
+config.production.py
+config.secret.py
+
+# OpenAI API 키
+openai_key.txt
+openai_api_key.txt
+OPENAI_API_KEY
+*.key
+*.pem
+*.p12
+*.pfx
+
+# ============================================================
+# 🔒 SECURITY - Personal Information & Sensitive Data
+# ============================================================
+# 개인 정보 파일
+*.personal
+*.private
+personal_data/
+private_data/
+sensitive_data/
+user_data/
+
+# 로그 파일 (민감 정보 포함 가능)
+*.log
+logs/
+*.log.*
+*.log.*
+
+# 백업 파일 (민감 정보 포함 가능)
+*.bak
+*.backup
+*.old
+*.tmp
+*~
+
+# ============================================================
+# Testing & Coverage
+# ============================================================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+*.cover
+*.py,cover
+.cache
+nosetests.xml
+coverage.xml
+*.profraw
+
+# ============================================================
+# IDEs & Editors
+# ============================================================
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# ============================================================
+# OS Files
+# ============================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ============================================================
+# Project Specific
+# ============================================================
+# 빌드 산출물
+dist/
+build/
+*.egg-info/
+
+# 캐시
+.cache/
+*.cache
+
+# 임시 파일
+tmp/
+temp/
+*.tmp
+
+# 데이터베이스 (민감 정보 포함 가능)
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# ============================================================
+# Documentation Build
+# ============================================================
+docs/_build/
+docs/.doctrees/
+site/
+
+# ============================================================
+# Docker
+# ============================================================
+.dockerignore
+docker-compose.override.yml
+*.dockerignore.local
+
+# ============================================================
+# Miscellaneous
+# ============================================================
+# 압축 파일 (민감 정보 포함 가능)
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+
+# 바이너리 파일
+*.exe
+*.dll
+*.dylib
+*.so
+
+# 기타
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.cython/
+*.orig
+
+# custom
+ai_docs
+docs
+benchmarks

@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "toon-output-parser"
+version = "0.1.0"
+description = "LangChain OutputParser for TOON (Token-Oriented Object Notation): LLM generates TOON, parser decodes to JSON/Pydantic."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Your Team"}]
+keywords = ["langchain", "output-parser", "toon", "structured-output", "pydantic"]
+dependencies = [
+  "pydantic>=2.5",
+  "langchain-core>=0.1.0",
+  "langchain-openai>=0.1.0",
+  "langchain-community>=0.1.0",
+]
+
+[project.optional-dependencies]
+toon = [
+  # Official implementation (preferred). If this extra fails due to availability,
+  # install from GitHub: `pip install git+https://github.com/toon-format/toon-python`
+  "toon-python>=0.1.0",
+]
+dev = [
+  "pytest>=7.4",
+  "pytest-asyncio>=0.23",
+  "ruff>=0.3.0",
+  "mypy>=1.7",
+  "tiktoken>=0.6.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
