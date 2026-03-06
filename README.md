@@ -99,9 +99,15 @@ TOON provides three ways to represent lists, choosing the most compact one autom
 
 ### Installation
 ```bash
+pip install toon-output-parser
+
+# Optional extras
+pip install "toon-output-parser[langchain]"
+pip install "toon-output-parser[openai]"
+pip install "toon-output-parser[community]"
+
+# Local editable install
 pip install -e .
-# Or with OpenAI extras
-pip install -e ".[openai]"
 ```
 
 ### Basic Usage
@@ -116,7 +122,7 @@ class UserInfo(BaseModel):
     age: int = Field(..., description="User's age")
     hobbies: list[str] = Field(default_factory=list, description="List of hobbies")
 
-# ToonOutputParser automatically chooses the best mode (minimal, adaptive, or json)
+# Default mode is adaptive. For minimal/json, set ParserConfig(instructions_mode=...)
 parser = ToonOutputParser(model=UserInfo)
 ```
 
@@ -171,10 +177,10 @@ CostAnalyzer.print_actual_usage_analysis(analysis)
 ## 🧠 Advanced Features
 
 ### 1. Adaptive Instructions
-The parser analyzed your Pydantic model's complexity (nesting, recursion, type variance) and chooses the most cost-effective prompt:
-- **Minimal**: For flat classification/extraction. (~100 tokens overhead)
-- **Official (full)**: For complex nested data.
-- **JSON Fallback**: Automatically used for recursive structures where TOON might be ambiguous.
+Current behavior:
+- Default is **adaptive** mode.
+- If you set **minimal** mode, complexity validation runs first.
+- In minimal mode, parser can auto-fallback to **json** for unsupported schema depth (configurable).
 
 ### 2. Tabular Array Format
 When extracting lists of similar objects, TOON uses a CSV-like tabular format that is significantly more compact than dash-lists or JSON arrays:
@@ -185,7 +191,23 @@ items[2,]{name,price}:
 ```
 
 ### 3. Integrated Error Recovery
-Includes a built-in strategy to retry with LLM feedback if parsing fails, ensuring higher reliability in production environments.
+Retry with LLM feedback is provided as an **example workflow** (`examples/15_error_recovery_example.py`), not as a built-in parser API.
+
+### 4. Packaging Smoke Check
+Use these local checks before release:
+```bash
+python -m compileall src
+python -c "from toon_langchain_parser import ToonOutputParser, ToonParser"
+
+# Editable install smoke test
+pip install -e .
+python -c "from toon_langchain_parser import ToonOutputParser"
+
+# Wheel install smoke test
+python -m build
+pip install --force-reinstall dist/toon_output_parser-*.whl
+python -c "from toon_langchain_parser import ToonOutputParser"
+```
 
 ---
 
@@ -198,6 +220,10 @@ Includes a built-in strategy to retry with LLM feedback if parsing fails, ensuri
 
 > [!WARNING]
 > This project is currently in **Beta/Experimental** status. While it offers significant cost savings, it is not a 1:1 replacement for modern Native JSON listeners (like OpenAI's JSON Mode) in all scenarios.
+
+### Breaking Change (0.1.x)
+- Top-level exports `ToonBackend` and `AutoToonBackend` were removed.
+- Use `ToonOutputParser`, `ToonParser`, and `ParserConfig` from `toon_langchain_parser`.
 
 ### Technical Constraints vs. JSON
 - **Not a full JSON Substitute**: TOON focuses on **efficiency for data extraction**, not complex data representation.
@@ -229,3 +255,30 @@ CostAnalyzer.print_actual_usage_analysis(analysis)
 
 ## 📜 License
 MIT License. See `LICENSE` for details.
+
+---
+
+## Cross-Platform Runtime Notes (2026-03-06)
+
+### Windows + Ubuntu parity
+Use identical Python entrypoints on both platforms:
+
+```bash
+python -m venv .venv
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+# Ubuntu/macOS: source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[langchain,openai,community,dev]"
+python scripts/smoke_check.py
+python -m pytest -q
+```
+
+### Docker container (Ubuntu base)
+
+```bash
+docker compose build
+docker compose run --rm toon-dev
+```
+
+### Behavior note
+In `adaptive` mode, recursive schemas are routed to JSON mode for stability.
