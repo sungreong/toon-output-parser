@@ -1,4 +1,4 @@
-# TOON Output Parser for LangChain (한국어)
+﻿# TOON Output Parser for LangChain (한국어)
 
 TOON 형식의 압축된 출력 텍스트를 Pydantic 모델로 검증/복원하는 구조화 출력 파서입니다.
 
@@ -58,6 +58,7 @@ python -m pip install -e .
 python -m pip install -e ".[langchain]"
 python -m pip install -e ".[openai]"
 python -m pip install -e ".[community]"
+python -m pip install -e ".[dev]"
 ```
 
 ## 빠른 시작
@@ -73,6 +74,27 @@ class UserInfo(BaseModel):
 
 parser = ToonOutputParser(model=UserInfo)
 result = parser.parse("name: John\nage: 25\nhobbies[2]: soccer,coding")
+```
+
+## 테스트할 때 실행할 스크립트
+
+```bash
+# 1) 코어 파서 스모크 테스트
+python scripts/smoke_check.py
+
+# 2) pytest 전체 테스트
+python -m pytest -q
+
+# 3) LangChain LCEL 진단(수동)
+python tests/diagnostics/verify_lcel.py
+```
+
+Docker:
+
+```bash
+docker compose build
+docker compose run --rm toon-dev python scripts/smoke_check.py
+docker compose run --rm toon-dev python -m pytest -q
 ```
 
 ## LangChain LCEL

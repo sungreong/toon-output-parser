@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -23,7 +24,22 @@ class CharacterFeatures(BaseModel):
     appearance: str = Field(default="", description="Appearance summary")
 
 
-def extract_character_info(document: str) -> tuple[str, CharacterFeatures]:
+def _print_raw_block(raw_output: str) -> None:
+    print("=== RAW BEGIN ===")
+    print(raw_output)
+    print("=== RAW END ===")
+
+
+def _dump_raw_if_configured(raw_output: str) -> str | None:
+    dump_path = os.getenv("TOON_RAW_DUMP_PATH", "").strip()
+    if not dump_path:
+        return None
+    with open(dump_path, "w", encoding="utf-8") as f:
+        f.write(raw_output)
+    return dump_path
+
+
+def extract_character_info(document: str) -> tuple[str, ToonOutputParser]:
     cfg = ParserConfig(instructions_mode="adaptive")
     parser = ToonOutputParser(model=CharacterFeatures, cfg=cfg)
 
@@ -52,7 +68,7 @@ def extract_character_info(document: str) -> tuple[str, CharacterFeatures]:
             "format_instructions": parser.get_format_instructions(),
         }
     )
-    return raw_output, parser.parse(raw_output)
+    return raw_output, parser
 
 
 def main() -> None:
@@ -61,10 +77,21 @@ def main() -> None:
         "She has short black hair and always carries a silver notebook."
     )
 
-    raw_output, result = extract_character_info(document)
+    raw_output, parser = extract_character_info(document)
+    _print_raw_block(raw_output)
 
-    print("=== RAW ===")
-    print(raw_output)
+    try:
+        result = parser.parse(raw_output)
+    except Exception as e:
+        print("\n=== PARSE ERROR ===")
+        print(str(e))
+        print("\n=== RAW REPLAY ===")
+        _print_raw_block(raw_output)
+        dumped_path = _dump_raw_if_configured(raw_output)
+        if dumped_path:
+            print(f"\nRAW output dumped to: {dumped_path}")
+        sys.exit(1)
+
     print("\n=== PARSED ===")
     print(json.dumps(result.model_dump(), ensure_ascii=False, indent=2))
     expected = {

@@ -66,6 +66,19 @@ def test_schema_aware_prompt_includes_typed_empty_guidance():
     assert "Typed empty examples for optional fields:" in instructions
 
 
+def test_schema_aware_prompt_includes_non_null_required_scalar_guidance():
+    class StrictModel(BaseModel):
+        title: str
+        score: int
+        note: str | None = None
+
+    parser = ToonParser(model=StrictModel, cfg=ParserConfig(instructions_mode="adaptive"))
+    instructions = parser.get_format_instructions()
+    assert "Required non-null scalar fields:" in instructions
+    assert "- title: must not be null" in instructions
+    assert "- score: must not be null" in instructions
+
+
 def test_missing_colon_fails_strictly():
     parser = ToonParser(model=FlatModel, cfg=ParserConfig(instructions_mode="adaptive"))
     with pytest.raises(ValueError):
@@ -169,6 +182,21 @@ def test_list_object_can_be_coerced_from_inline_scalar():
     out = parser.parse("traits: detail-oriented")
     assert len(out.traits) == 1
     assert out.traits[0].name == "detail-oriented"
+
+
+def test_list_object_can_be_coerced_from_dash_scalar_items():
+    class Trait(BaseModel):
+        name: str
+        level: str = ""
+
+    class Member(BaseModel):
+        traits: list[Trait] = Field(default_factory=list)
+
+    parser = ToonParser(model=Member, cfg=ParserConfig(instructions_mode="adaptive"))
+    out = parser.parse("traits:\n  - detail-oriented\n  - methodical")
+    assert len(out.traits) == 2
+    assert out.traits[0].name == "detail-oriented"
+    assert out.traits[1].name == "methodical"
 
 
 def test_parse_with_recovery_via_repair_callback():

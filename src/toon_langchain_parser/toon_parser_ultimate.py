@@ -490,12 +490,43 @@ class ToonIntelligence:
     @staticmethod
     def _build_invalid_examples() -> List[str]:
         return [
-            "Invalid examples:",
-            "bad_line_without_colon",
-            "items:",
-            "  -name: text",
-            'payload: {"name": "json"}',
+            "Invalid patterns (do not copy):",
+            "- line without colon",
+            "- list item without a space after '-'",
+            "- JSON object literal inside TOON value",
         ]
+
+    @staticmethod
+    def _is_nullable_schema(schema: Dict[str, Any], defs: Dict[str, Any]) -> bool:
+        resolved = ToonIntelligence._resolve_schema(schema, defs)
+        if not isinstance(resolved, dict):
+            return False
+        if resolved.get("type") == "null":
+            return True
+        for key in ("anyOf", "oneOf"):
+            union_items = resolved.get(key)
+            if isinstance(union_items, list):
+                for item in union_items:
+                    if isinstance(item, dict) and ToonIntelligence._resolve_schema(item, defs).get("type") == "null":
+                        return True
+        return False
+
+    @staticmethod
+    def _build_non_null_required_rules(schema: Dict[str, Any], defs: Dict[str, Any]) -> List[str]:
+        props = schema.get("properties", {}) or {}
+        required = set(schema.get("required", []))
+        lines: List[str] = []
+        for name in props.keys():
+            if name not in required:
+                continue
+            field_schema = ToonIntelligence._resolve_schema(props.get(name, {}), defs)
+            field_type = field_schema.get("type")
+            if field_type not in ("string", "integer", "number", "boolean"):
+                continue
+            if ToonIntelligence._is_nullable_schema(props.get(name, {}), defs):
+                continue
+            lines.append(f"- {name}: must not be null")
+        return lines
 
     @staticmethod
     def _empty_literal(schema: Dict[str, Any], defs: Dict[str, Any]) -> str:
@@ -559,6 +590,11 @@ class ToonIntelligence:
         if typed_empty_examples:
             sections.extend(["", "Typed empty examples for optional fields:"])
             sections.extend(typed_empty_examples)
+
+        non_null_rules = ToonIntelligence._build_non_null_required_rules(schema, defs)
+        if non_null_rules:
+            sections.extend(["", "Required non-null scalar fields:"])
+            sections.extend(non_null_rules)
 
         sections.extend(["", "Flat example:"])
         sections.extend(ToonIntelligence._build_flat_example(schema, defs))
@@ -1224,6 +1260,18 @@ class ToonParser:
                         i += 1
 
                 out.append(obj)
+                continue
+
+            if (items_schema or {}).get("type") == "object" and self.cfg.coerce_object_list_from_inline_scalars:
+                object_key = self._best_inline_object_key(items_schema)
+                if object_key is None:
+                    raise ToonParserError(
+                        f"{path}: scalar dash item cannot be coerced to list[object]; "
+                        "use '- name: value' object notation"
+                    )
+                key_schema = self._resolve_nullable((item_props.get(object_key)))
+                out.append({object_key: self._parse_scalar(item_text, key_schema)})
+                i += 1
                 continue
 
             out.append(self._parse_scalar(item_text, items_schema))

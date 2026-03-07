@@ -1,4 +1,4 @@
-# TOON Output Parser for LangChain
+﻿# TOON Output Parser for LangChain
 
 A structured output parser for Pydantic models that accepts compact TOON text and validates it into typed objects.
 
@@ -58,6 +58,7 @@ python -m pip install -e .
 python -m pip install -e ".[langchain]"
 python -m pip install -e ".[openai]"
 python -m pip install -e ".[community]"
+python -m pip install -e ".[dev]"
 ```
 
 ## Quick Start
@@ -73,6 +74,27 @@ class UserInfo(BaseModel):
 
 parser = ToonOutputParser(model=UserInfo)
 result = parser.parse("name: John\nage: 25\nhobbies[2]: soccer,coding")
+```
+
+## What To Run For Testing
+
+```bash
+# 1) Core parser smoke test
+python scripts/smoke_check.py
+
+# 2) Full pytest suite
+python -m pytest -q
+
+# 3) LangChain LCEL diagnostic (manual)
+python tests/diagnostics/verify_lcel.py
+```
+
+Docker:
+
+```bash
+docker compose build
+docker compose run --rm toon-dev python scripts/smoke_check.py
+docker compose run --rm toon-dev python -m pytest -q
 ```
 
 ## LangChain LCEL
