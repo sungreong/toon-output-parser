@@ -7,10 +7,8 @@ WORKDIR /app
 
 COPY pyproject.toml README.md /app/
 COPY src /app/src
-COPY tests /app/tests
-COPY examples /app/examples
 COPY scripts /app/scripts
 
-RUN pip install --no-cache-dir -e ".[langchain,openai,community,dev]"
+RUN pip install --no-cache-dir -e ".[langchain,openai,community]"
 
 CMD ["python", "scripts/smoke_check.py"]
