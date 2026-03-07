@@ -1,18 +1,18 @@
-# TOON Output Parser for LangChain
+# TOON Output Parser for LangChain (한국어)
 
-A structured output parser for Pydantic models that accepts compact TOON text and validates it into typed objects.
+TOON 형식의 압축된 출력 텍스트를 Pydantic 모델로 검증/복원하는 구조화 출력 파서입니다.
 
-[한국어 README](README.ko.md)
+[English README](README.md)
 
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![LangChain](https://img.shields.io/badge/LangChain-Integration-green.svg)](https://github.com/langchain-ai/langchain)
 [![Pydantic](https://img.shields.io/badge/Pydantic-v2-red.svg)](https://docs.pydantic.dev/)
 
-## Why TOON
+## TOON을 쓰는 이유
 
-TOON is a compact, indentation-based format intended for LLM extraction workflows. The parser restores TOON text into dict/object form and validates it with your original Pydantic schema.
+TOON은 LLM 추출 워크플로우를 위한 간결한 들여쓰기 기반 포맷입니다. 파서는 TOON 텍스트를 dict/object로 복원하고 원래의 Pydantic 스키마로 검증합니다.
 
-## Syntax Snapshot
+## 문법 예시
 
 ```toon
 name: John Doe
@@ -22,7 +22,7 @@ address:
   city: Seoul
 ```
 
-Array options:
+배열 표현:
 
 ```toon
 items:
@@ -34,33 +34,33 @@ products[2,]{name,price}:
   Galaxy S24,1100000
 ```
 
-## Feature Matrix
+## 기능 매트릭스
 
-| Feature | Support | Notes |
+| 기능 | 지원 | 비고 |
 | :--- | :---: | :--- |
-| Scalars | Yes | `str`, `int`, `float`, `bool`, `None` |
-| Nested objects | Yes | 2-space indentation |
-| Inline scalar list | Yes | `tags[3]: red,green,blue` |
-| Tabular object array | Yes | `items[N,]{f1,f2}:` |
-| Dot notation | Yes (default) | Example: `details.summary: concise` |
-| Dot notation disabled mode | Yes | Set `ParserConfig(allow_dotted_paths=False)` |
-| Recursive schema handling | Auto fallback | `adaptive` mode routes recursive models to JSON mode |
+| 스칼라 | Yes | `str`, `int`, `float`, `bool`, `None` |
+| 중첩 객체 | Yes | 2칸 들여쓰기 |
+| 인라인 스칼라 리스트 | Yes | `tags[3]: red,green,blue` |
+| 테이블형 객체 배열 | Yes | `items[N,]{f1,f2}:` |
+| Dot notation | Yes (기본) | 예: `details.summary: concise` |
+| Dot notation 비활성화 | Yes | `ParserConfig(allow_dotted_paths=False)` |
+| 재귀 스키마 처리 | Auto fallback | `adaptive`에서 JSON 모드로 자동 전환 |
 
-## Installation
+## 설치
 
 ```bash
-# Install from source (PyPI package is not published yet)
+# 소스 설치 (PyPI 미배포)
 git clone https://github.com/sungreong/toon-output-parser.git
 cd toon-output-parser
 python -m pip install -e .
 
-# Optional extras
+# 선택 extras
 python -m pip install -e ".[langchain]"
 python -m pip install -e ".[openai]"
 python -m pip install -e ".[community]"
 ```
 
-## Quick Start
+## 빠른 시작
 
 ```python
 from pydantic import BaseModel, Field
@@ -96,18 +96,18 @@ result = chain.invoke(
 )
 ```
 
-## Modes and Constraints
+## 모드 및 제약
 
-- Default mode is `adaptive`.
-- In `adaptive`, recursive/high-complexity schemas can be switched to JSON mode for stability.
-- `minimal` mode applies stricter complexity validation.
-- TOON remains indentation-sensitive; malformed indentation and schema-incompatible shapes will fail validation.
+- 기본 모드는 `adaptive`입니다.
+- `adaptive`에서는 재귀/고복잡 스키마를 안정성을 위해 JSON 모드로 전환할 수 있습니다.
+- `minimal` 모드는 더 엄격한 복잡도 검증을 적용합니다.
+- TOON은 들여쓰기 민감 포맷이므로, 들여쓰기 오류나 스키마 불일치 구조는 검증에 실패합니다.
 
-## Experimental Status
+## Experimental 상태
 
 > [!WARNING]
-> This project is in Beta/Experimental status. It is optimized for token efficiency in extraction workflows, not a full replacement for every native JSON mode scenario.
+> 이 프로젝트는 Beta/Experimental 상태입니다. 추출 워크플로우의 토큰 효율을 목표로 하며, 모든 native JSON mode 시나리오를 완전히 대체하지는 않습니다.
 
-## License
+## 라이선스
 
-MIT License. See [LICENSE](LICENSE).
+MIT License. 자세한 내용은 [LICENSE](LICENSE)를 참고하세요.
