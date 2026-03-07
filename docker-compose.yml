@@ -10,6 +10,6 @@ services:
       OPENAI_TEMPERATURE: ${OPENAI_TEMPERATURE:-0.0}
     volumes:
       - .:/app
-    command: ["python", "scripts/smoke_check.py"]
+    command: ["sh", "-c", "python scripts/smoke_check.py && tail -f /dev/null"]
     stdin_open: true
     tty: true
