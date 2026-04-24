@@ -28,6 +28,8 @@ class PromptCostMetrics:
     # 출력 관련 (실제 데이터로 측정)
     avg_output_length: int = 0
     avg_output_lines: int = 0
+    format_instructions_tokens: int | None = None
+    avg_output_tokens: int | None = None
     
     # 비율
     output_to_data_ratio: float = 0.0  # 출력 길이 / 실제 데이터 크기
@@ -35,9 +37,9 @@ class PromptCostMetrics:
     def __str__(self) -> str:
         return (
             f"PromptCostMetrics(\n"
-            f"  Input: {self.format_instructions_length} chars, "
+            f"  Input: {self.format_instructions_length} rough chars, "
             f"{self.format_instructions_lines} lines\n"
-            f"  Output: {self.avg_output_length} chars, "
+            f"  Output: {self.avg_output_length} rough chars, "
             f"{self.avg_output_lines} lines\n"
             f"  Ratio: {self.output_to_data_ratio:.2f}x\n"
             f")"
@@ -64,23 +66,23 @@ class FormatComparison:
         print()
         
         print("📊 JSON Structured Output:")
-        print(f"  입력 (format instructions): {self.json_metrics.format_instructions_length:,} chars "
+        print(f"  입력 (format instructions): {self.json_metrics.format_instructions_length:,} rough chars "
               f"({self.json_metrics.format_instructions_lines} lines)")
-        print(f"  출력 (avg): {self.json_metrics.avg_output_length:,} chars "
+        print(f"  출력 (avg): {self.json_metrics.avg_output_length:,} rough chars "
               f"({self.json_metrics.avg_output_lines} lines)")
         print(f"  출력/데이터 비율: {self.json_metrics.output_to_data_ratio:.2f}x")
         json_total = self.json_metrics.format_instructions_length + self.json_metrics.avg_output_length
-        print(f"  총합: {json_total:,} chars")
+        print(f"  총합: {json_total:,} rough chars")
         print()
         
         print("📊 TOON Format:")
-        print(f"  입력 (format instructions): {self.toon_metrics.format_instructions_length:,} chars "
+        print(f"  입력 (format instructions): {self.toon_metrics.format_instructions_length:,} rough chars "
               f"({self.toon_metrics.format_instructions_lines} lines)")
-        print(f"  출력 (avg): {self.toon_metrics.avg_output_length:,} chars "
+        print(f"  출력 (avg): {self.toon_metrics.avg_output_length:,} rough chars "
               f"({self.toon_metrics.avg_output_lines} lines)")
         print(f"  출력/데이터 비율: {self.toon_metrics.output_to_data_ratio:.2f}x")
         toon_total = self.toon_metrics.format_instructions_length + self.toon_metrics.avg_output_length
-        print(f"  총합: {toon_total:,} chars")
+        print(f"  총합: {toon_total:,} rough chars")
         print()
         
         print("💰 비용 절감 분석:")
@@ -95,10 +97,10 @@ class FormatComparison:
         # 시각적 표현
         if self.total_reduction_percent < 0:
             saved = abs(json_total - toon_total)
-            print(f"✅ TOON 사용 시 요청당 약 {saved:,} chars 절감!")
-            print(f"   (1000회 호출 시: {saved * 1000:,} chars 절감)")
+            print(f"✅ TOON 사용 시 요청당 약 {saved:,} rough chars 절감!")
+            print(f"   (1000회 호출 시: {saved * 1000:,} rough chars 절감)")
         else:
-            print(f"⚠️ TOON 사용 시 요청당 약 {abs(json_total - toon_total):,} chars 증가")
+            print(f"⚠️ TOON 사용 시 요청당 약 {abs(json_total - toon_total):,} rough chars 증가")
         
         print()
         print("=" * 80)
@@ -106,6 +108,18 @@ class FormatComparison:
 
 class CostAnalyzer:
     """프롬프트 비용 분석기."""
+
+    @staticmethod
+    def _count_tokens(text: str) -> int | None:
+        try:
+            import tiktoken
+        except Exception:
+            return None
+        try:
+            encoding = tiktoken.get_encoding("o200k_base")
+        except Exception:
+            encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text))
     
     @staticmethod
     def analyze_actual_usage(
@@ -162,6 +176,8 @@ Important:
 - Include all required fields
 """
         json_input_len = len(json_instructions)
+        toon_input_tokens = CostAnalyzer._count_tokens(toon_instructions)
+        json_input_tokens = CostAnalyzer._count_tokens(json_instructions)
         
         # 2. 실제 출력 길이 측정
         toon_output_len = len(toon_raw_output.strip())
@@ -172,6 +188,8 @@ Important:
         json_output = json.dumps(data, indent=2, ensure_ascii=False)
         json_output_len = len(json_output)
         json_output_lines = len(json_output.splitlines())
+        toon_output_tokens = CostAnalyzer._count_tokens(toon_raw_output.strip())
+        json_output_tokens = CostAnalyzer._count_tokens(json_output)
         
         # 3. 총합 계산
         toon_total = toon_input_len + toon_output_len
@@ -185,6 +203,8 @@ Important:
             # 입력 (format instructions)
             "toon_input_chars": toon_input_len,
             "json_input_chars": json_input_len,
+            "toon_input_tokens": toon_input_tokens,
+            "json_input_tokens": json_input_tokens,
             "input_diff": json_input_len - toon_input_len,
             "input_diff_percent": ((toon_input_len - json_input_len) / json_input_len * 100),
             "effective_mode": effective_mode,  # 실제 사용된 모드 (minimal/adaptive/json)
@@ -194,6 +214,8 @@ Important:
             "toon_output_lines": toon_output_lines,
             "json_output_chars": json_output_len,
             "json_output_lines": json_output_lines,
+            "toon_output_tokens": toon_output_tokens,
+            "json_output_tokens": json_output_tokens,
             "output_diff": json_output_len - toon_output_len,
             "output_diff_percent": ((toon_output_len - json_output_len) / json_output_len * 100),
             
@@ -225,11 +247,16 @@ Important:
         print("=" * 80)
         print()
         
-        print("📥 입력 (Format Instructions):")
+        print("📥 입력 (Format Instructions, rough chars):")
         effective_mode = analysis.get('effective_mode', 'unknown')
         mode_info = f" [{effective_mode}]" if effective_mode != 'unknown' else ""
-        print(f"  JSON:  {analysis['json_input_chars']:>6,} chars")
-        print(f"  TOON:  {analysis['toon_input_chars']:>6,} chars{mode_info}")
+        print(f"  JSON:  {analysis['json_input_chars']:>6,} rough chars")
+        print(f"  TOON:  {analysis['toon_input_chars']:>6,} rough chars{mode_info}")
+        if analysis.get("json_input_tokens") is not None and analysis.get("toon_input_tokens") is not None:
+            print(
+                f"  Tokens: JSON {analysis['json_input_tokens']:,} / "
+                f"TOON {analysis['toon_input_tokens']:,}"
+            )
         diff = analysis['input_diff']  # json - toon
         percent = analysis['input_diff_percent']  # ((toon - json) / json) * 100
         
@@ -239,37 +266,42 @@ Important:
         
         if diff > 0:
             # JSON이 더 큼 -> TOON이 더 짧음
-            print(f"  차이:  {diff:>+6,} chars (TOON이 {abs(percent):.1f}% 더 짧음)")
+            print(f"  차이:  {diff:>+6,} rough chars (TOON이 {abs(percent):.1f}% 더 짧음)")
         else:
             # TOON이 더 큼 -> TOON이 더 김
-            print(f"  차이:  {diff:>+6,} chars (TOON이 {abs(percent):.1f}% 더 김)")
+            print(f"  차이:  {diff:>+6,} rough chars (TOON이 {abs(percent):.1f}% 더 김)")
         print()
         
-        print("📤 출력 (Actual Output):")
-        print(f"  JSON:  {analysis['json_output_chars']:>6,} chars ({analysis['json_output_lines']:>3} lines)")
-        print(f"  TOON:  {analysis['toon_output_chars']:>6,} chars ({analysis['toon_output_lines']:>3} lines)")
+        print("📤 출력 (Actual Output, rough chars):")
+        print(f"  JSON:  {analysis['json_output_chars']:>6,} rough chars ({analysis['json_output_lines']:>3} lines)")
+        print(f"  TOON:  {analysis['toon_output_chars']:>6,} rough chars ({analysis['toon_output_lines']:>3} lines)")
+        if analysis.get("json_output_tokens") is not None and analysis.get("toon_output_tokens") is not None:
+            print(
+                f"  Tokens: JSON {analysis['json_output_tokens']:,} / "
+                f"TOON {analysis['toon_output_tokens']:,}"
+            )
         diff = analysis['output_diff']  # json - toon
         percent = analysis['output_diff_percent']  # ((toon - json) / json) * 100
         if diff > 0:
             # JSON이 더 큼 -> TOON이 더 짧음
-            print(f"  차이:  {diff:>+6,} chars (TOON이 {abs(percent):.1f}% 더 짧음)")
+            print(f"  차이:  {diff:>+6,} rough chars (TOON이 {abs(percent):.1f}% 더 짧음)")
         else:
             # TOON이 더 큼 -> JSON이 더 짧음
-            print(f"  차이:  {diff:>+6,} chars (JSON이 {abs(percent):.1f}% 더 짧음)")
+            print(f"  차이:  {diff:>+6,} rough chars (JSON이 {abs(percent):.1f}% 더 짧음)")
         print()
         
-        print("💰 총 비용 (입력 + 출력):")
-        print(f"  JSON:  {analysis['json_total_chars']:>6,} chars")
-        print(f"  TOON:  {analysis['toon_total_chars']:>6,} chars")
+        print("💰 총 비용 (입력 + 출력, rough chars):")
+        print(f"  JSON:  {analysis['json_total_chars']:>6,} rough chars")
+        print(f"  TOON:  {analysis['toon_total_chars']:>6,} rough chars")
         saved = analysis['chars_saved']
         if saved > 0:
-            print(f"  절감:  {saved:>+6,} chars ({analysis['total_reduction_percent']:.1f}%) ✅")
+            print(f"  절감:  {saved:>+6,} rough chars ({analysis['total_reduction_percent']:.1f}%) ✅")
         else:
-            print(f"  추가:  {saved:>+6,} chars ({abs(analysis['total_reduction_percent']):.1f}%) ⚠️")
+            print(f"  추가:  {saved:>+6,} rough chars ({abs(analysis['total_reduction_percent']):.1f}%) ⚠️")
         print()
         
         print("📦 데이터 오버헤드:")
-        print(f"  실제 데이터: {analysis['data_size']:>6,} chars (최소화된 JSON)")
+        print(f"  실제 데이터: {analysis['data_size']:>6,} rough chars (최소화된 JSON)")
         print(f"  JSON 오버헤드: {analysis['json_overhead_ratio']:.2f}x")
         print(f"  TOON 오버헤드: {analysis['toon_overhead_ratio']:.2f}x")
         print()
@@ -317,6 +349,7 @@ Important:
         return PromptCostMetrics(
             format_instructions_length=len(instructions),
             format_instructions_lines=len(instructions.splitlines()),
+            format_instructions_tokens=CostAnalyzer._count_tokens(instructions),
         )
     
     @staticmethod
@@ -339,6 +372,7 @@ Important:
         return PromptCostMetrics(
             format_instructions_length=len(instructions),
             format_instructions_lines=len(instructions.splitlines()),
+            format_instructions_tokens=CostAnalyzer._count_tokens(instructions),
         )
     
     @staticmethod
@@ -504,21 +538,21 @@ Important:
         print("=" * 80)
         print("💰 비용 절감 추정")
         print("=" * 80)
-        print(f"기준: {requests_per_day:,}회/일, ${cost_per_million_chars}/1M chars")
+        print(f"기준: {requests_per_day:,}회/일, ${cost_per_million_chars}/1M rough chars")
         print()
         
         if savings["chars_saved_per_request"] > 0:
             print("✅ TOON 사용 시 절감:")
-            print(f"  요청당: {savings['chars_saved_per_request']:,} chars")
-            print(f"  일간: {savings['chars_saved_per_day']:,} chars (${savings['cost_saved_per_day_usd']:.2f})")
-            print(f"  월간: {savings['chars_saved_per_month']:,} chars (${savings['cost_saved_per_month_usd']:.2f})")
-            print(f"  연간: {savings['chars_saved_per_year']:,} chars (${savings['cost_saved_per_year_usd']:.2f})")
+            print(f"  요청당: {savings['chars_saved_per_request']:,} rough chars")
+            print(f"  일간: {savings['chars_saved_per_day']:,} rough chars (${savings['cost_saved_per_day_usd']:.2f})")
+            print(f"  월간: {savings['chars_saved_per_month']:,} rough chars (${savings['cost_saved_per_month_usd']:.2f})")
+            print(f"  연간: {savings['chars_saved_per_year']:,} rough chars (${savings['cost_saved_per_year_usd']:.2f})")
         else:
             print("⚠️ TOON 사용 시 추가 비용:")
-            print(f"  요청당: {abs(savings['chars_saved_per_request']):,} chars")
-            print(f"  일간: {abs(savings['chars_saved_per_day']):,} chars (${abs(savings['cost_saved_per_day_usd']):.2f})")
-            print(f"  월간: {abs(savings['chars_saved_per_month']):,} chars (${abs(savings['cost_saved_per_month_usd']):.2f})")
-            print(f"  연간: {abs(savings['chars_saved_per_year']):,} chars (${abs(savings['cost_saved_per_year_usd']):.2f})")
+            print(f"  요청당: {abs(savings['chars_saved_per_request']):,} rough chars")
+            print(f"  일간: {abs(savings['chars_saved_per_day']):,} rough chars (${abs(savings['cost_saved_per_day_usd']):.2f})")
+            print(f"  월간: {abs(savings['chars_saved_per_month']):,} rough chars (${abs(savings['cost_saved_per_month_usd']):.2f})")
+            print(f"  연간: {abs(savings['chars_saved_per_year']):,} rough chars (${abs(savings['cost_saved_per_year_usd']):.2f})")
         
         print()
         print("=" * 80)
