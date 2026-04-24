@@ -28,8 +28,9 @@ DEFAULT_PARSER_CONFIG = ParserConfig(
     complexity_threshold=3,
     protect_string_ids=True,
     strict_schema=True,
-    strict_count=False,
+    strict_count=True,
     allow_tabular_for_flat_objects=True,
+    expand_paths="off",
 )
 
 

@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Tuple, Union
 
 Scalar = Union[str, int, float, bool, None]
 
-_TABULAR_HEADER_RE = re.compile(r"^(?P<name>[A-Za-z0-9_]+)?\[(?P<n>\d+),(?:#)?\]\{(?P<cols>[^}]+)\}:\s*$")
+_TABULAR_HEADER_RE = re.compile(r"^(?P<name>[A-Za-z0-9_]+)?\[(?P<n>\d+),?(?:#)?\]\{(?P<cols>[^}]+)\}:\s*$")
 _LIST_INLINE_RE = re.compile(r"^(?P<name>[A-Za-z0-9_]+)\[(?P<n>\d+)\]:\s*(?P<vals>.*)$")
 
 def _parse_scalar(raw: str) -> Scalar:
@@ -42,7 +42,7 @@ class SimpleToon:
     지원(부분):
     - 객체: `key: value` / 중첩은 2-space indent 기반
     - 리스트(인라인): `tags[3]: a,b,c`
-    - 탭уляр 배열: `items[2,]{id,name}:` + 다음 줄 CSV row
+    - 탭уляр 배열: `items[2]{id,name}:` + 다음 줄 CSV row
 
     한계:
     - spec 전체를 100% 구현하지 않습니다.
@@ -90,7 +90,7 @@ class SimpleToon:
         pad = " " * (self.indent * level)
         cols = list(rows[0].keys()) if rows else []
         head_name = f"{name}" if name else ""
-        header = f"{pad}{head_name}[{len(rows)},]" + "{" + ",".join(cols) + "}:"
+        header = f"{pad}{head_name}[{len(rows)}]" + "{" + ",".join(cols) + "}:"
         out = [header]
         for r in rows:
             out.append(pad + " " * self.indent + ",".join(_scalar_to_str(r.get(c)) for c in cols))

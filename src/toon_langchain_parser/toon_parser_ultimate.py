@@ -6,8 +6,8 @@ import io
 import json
 import re
 import warnings
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from dataclasses import asdict, dataclass, field
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Type
 
 try:
     from pydantic import BaseModel
@@ -41,15 +41,21 @@ class ParserConfig:
     complexity_threshold: int = 3
     protect_string_ids: bool = True
     strict_schema: bool = True
-    strict_count: bool = False
+    strict_count: bool = True
     allow_tabular_for_flat_objects: bool = True
     instructions_mode: str = "adaptive"  # adaptive | minimal | json
     auto_fallback_to_json: bool = True
     strict_minimal_validation: bool = False
     max_repair_attempts: int = 1
     repair_excerpt_lines: int = 12
-    allow_dotted_paths: bool = True
+    delimiter: Literal["comma", "pipe", "tab"] = "comma"
+    expand_paths: Literal["off", "safe"] = "off"
+    compat_legacy_headers: bool = True
+    allow_dotted_paths: Optional[bool] = None
     coerce_object_list_from_inline_scalars: bool = True
+    fallback_policy: Literal["toon_first", "balanced", "safe"] = "toon_first"
+    soft_fallback_threshold: Optional[int] = None
+    string_safety: Literal["strict", "smart", "permissive"] = "smart"
 
 
 @dataclass(frozen=True)
@@ -77,8 +83,10 @@ class ComplexityMetrics:
     has_recursive_refs: bool = False
     has_dynamic_object_keys: bool = False
     has_array_of_arrays: bool = False
+    has_broad_unions: bool = False
     has_union_inside_array: bool = False
     has_union_inside_object: bool = False
+    max_scalar_union_choices: int = 0
     violation_reasons: List[str] = field(default_factory=list)
 
     def add_violation(self, reason: str) -> None:
@@ -115,6 +123,8 @@ class ComplexityMetrics:
             self.add_violation("dynamic object keys are not allowed")
         if self.has_array_of_arrays and not limits.allow_array_of_arrays:
             self.add_violation("array-of-array schemas are not allowed")
+        if self.has_broad_unions:
+            self.add_violation("broad unions require JSON fallback")
 
         return not self.violation_reasons
 
@@ -138,26 +148,80 @@ class ModelComplexityAnalyzer:
         self._ref_stack: set[str] = set()
 
     def analyze(self) -> ComplexityMetrics:
+        self.metrics = ComplexityMetrics()
+        self._ref_stack = set()
         self._analyze_schema(self.schema, depth=0, array_depth=0, path="$", in_union=False, in_array=False)
         return self.metrics
 
-    def recommended_mode(self) -> str:
-        metrics = self.analyze()
+    def _hard_reasons(self, metrics: ComplexityMetrics) -> List[str]:
+        reasons: List[str] = []
         if metrics.has_recursive_refs:
-            return "json"
+            reasons.append("recursive refs")
         if metrics.has_dynamic_object_keys:
-            return "json"
+            reasons.append("dynamic object keys")
         if metrics.has_nested_unions:
-            return "json"
+            reasons.append("nested unions")
+        if metrics.has_broad_unions:
+            reasons.append("complex union branches")
         if metrics.has_union_inside_array:
-            return "json"
+            reasons.append("union inside array")
         if metrics.has_array_of_arrays:
-            return "json"
+            reasons.append("array-of-arrays")
+        return reasons
+
+    def _soft_reasons(self, metrics: ComplexityMetrics) -> List[str]:
+        reasons: List[str] = []
         if metrics.max_nesting_depth >= 4:
-            return "json"
+            reasons.append(f"depth={metrics.max_nesting_depth}")
         if metrics.largest_list_object_width >= 8:
-            return "json"
-        return "adaptive"
+            reasons.append(f"wide list objects={metrics.largest_list_object_width}")
+        if metrics.max_object_fields >= 16:
+            reasons.append(f"top-level fields={metrics.max_object_fields}")
+        if metrics.max_array_nesting >= 2:
+            reasons.append(f"array nesting={metrics.max_array_nesting}")
+        if metrics.max_scalar_union_choices >= 3:
+            reasons.append(f"scalar union choices={metrics.max_scalar_union_choices}")
+        return reasons
+
+    def _risk_score(self, metrics: ComplexityMetrics) -> int:
+        score = 0
+        if metrics.max_nesting_depth >= 4:
+            score += 12 + (metrics.max_nesting_depth - 4) * 3
+        if metrics.largest_list_object_width >= 8:
+            score += 8 + (metrics.largest_list_object_width - 8)
+        if metrics.max_object_fields >= 16:
+            score += 6 + max(0, metrics.max_object_fields - 16) // 2
+        if metrics.max_array_nesting >= 2:
+            score += 6 + (metrics.max_array_nesting - 2) * 3
+        if metrics.max_scalar_union_choices >= 3:
+            score += 5 + (metrics.max_scalar_union_choices - 3) * 2
+        return score
+
+    def mode_decision(self, cfg: Optional[ParserConfig] = None) -> Dict[str, Any]:
+        cfg = cfg or ParserConfig()
+        metrics = self.analyze()
+        hard_reasons = self._hard_reasons(metrics)
+        soft_reasons = self._soft_reasons(metrics)
+        risk_score = self._risk_score(metrics)
+        policy_thresholds = {"toon_first": None, "balanced": 18, "safe": 12}
+        threshold = (
+            cfg.soft_fallback_threshold
+            if cfg.soft_fallback_threshold is not None
+            else policy_thresholds[cfg.fallback_policy]
+        )
+        soft_fallback = threshold is not None and risk_score >= threshold
+        mode = "json" if hard_reasons or soft_fallback else "toon"
+        return {
+            "mode": mode,
+            "hard_reasons": hard_reasons,
+            "soft_reasons": soft_reasons,
+            "risk_score": risk_score,
+            "metrics": asdict(metrics),
+        }
+
+    def recommended_mode(self, cfg: Optional[ParserConfig] = None) -> str:
+        decision = self.mode_decision(cfg)
+        return "json" if decision["mode"] == "json" else "adaptive"
 
     def _resolve_ref(self, ref: str) -> Dict[str, Any]:
         if not ref.startswith("#/"):
@@ -211,12 +275,33 @@ class ModelComplexityAnalyzer:
 
         if "anyOf" in schema or "oneOf" in schema:
             union_items = schema.get("anyOf", schema.get("oneOf", []))
+            non_null_items = [
+                item
+                for item in union_items
+                if not (isinstance(item, dict) and item.get("type") == "null")
+            ]
             self.metrics.union_type_count += 1
-            if in_union:
+            self.metrics.max_scalar_union_choices = max(
+                self.metrics.max_scalar_union_choices,
+                len(non_null_items),
+            )
+            broad_union = any(
+                isinstance(item, dict)
+                and (
+                    item.get("type") in ("object", "array")
+                    or "properties" in item
+                    or "items" in item
+                    or "$ref" in item
+                )
+                for item in non_null_items
+            )
+            if broad_union:
+                self.metrics.has_broad_unions = True
+            if in_union and len(non_null_items) > 1:
                 self.metrics.has_nested_unions = True
-            if in_array:
+            if in_array and len(non_null_items) > 1:
                 self.metrics.has_union_inside_array = True
-            if depth > 0:
+            if depth > 0 and len(non_null_items) > 1:
                 self.metrics.has_union_inside_object = True
             for idx, item in enumerate(union_items):
                 if isinstance(item, dict):
@@ -342,8 +427,6 @@ class ToonIntelligence:
         if "anyOf" in items or "oneOf" in items or "$ref" in items:
             return True
         props = items.get("properties", {}) or {}
-        if len(props) > threshold:
-            return True
         for value in props.values():
             child = ToonIntelligence._unwrap_nullable(value, defs)
             if child.get("type") in ("object", "array") or "$ref" in child or "anyOf" in child or "oneOf" in child:
@@ -458,8 +541,34 @@ class ToonIntelligence:
 
     @staticmethod
     def _build_object_list_example(field_name: str, item_schema: Dict[str, Any], defs: Dict[str, Any]) -> List[str]:
-        lines = [f"{field_name}:"]
         child_props = item_schema.get("properties", {}) or {}
+        scalar_columns: List[str] = []
+        for child_name, child_schema in child_props.items():
+            resolved = ToonIntelligence._unwrap_nullable(child_schema, defs)
+            if resolved.get("type") not in ("string", "integer", "number", "boolean"):
+                scalar_columns = []
+                break
+            scalar_columns.append(child_name)
+        if scalar_columns:
+            columns = scalar_columns[:4]
+            rows = [f"{field_name}[2]{{{','.join(columns)}}}:"]
+            rows.append(
+                "  "
+                + ",".join(
+                    ToonIntelligence._dummy_scalar(child_props[column], defs)
+                    for column in columns
+                )
+            )
+            rows.append(
+                "  "
+                + ",".join(
+                    ToonIntelligence._dummy_scalar(child_props[column], defs)
+                    for column in columns
+                )
+            )
+            return rows
+
+        lines = [f"{field_name}:"]
         first = True
         for child_name, child_schema in list(child_props.items())[:3]:
             resolved = ToonIntelligence._unwrap_nullable(child_schema, defs)
@@ -555,8 +664,9 @@ class ToonIntelligence:
 
     @staticmethod
     def build_schema_aware_prompt(
-        model: Type[BaseModel], cfg: ParserConfig = ParserConfig(), concise: bool = False
+        model: Type[BaseModel], cfg: Optional[ParserConfig] = None, concise: bool = False
     ) -> str:
+        cfg = cfg or ParserConfig()
         schema = model.model_json_schema()
         defs: Dict[str, Any] = {}
         if isinstance(schema.get("$defs"), dict):
@@ -573,9 +683,13 @@ class ToonIntelligence:
             "- every line must contain a colon",
             "- use 2 spaces for indentation; never use tabs",
             "- arrays of scalars use field[N]: a,b,c",
-            "- arrays of objects use dash list notation under the field",
+            "- flat arrays of objects may use field[N]{col1,col2}: followed by rows",
+            "- nested or non-uniform arrays of objects use dash list notation under the field",
+            "- [N] must match the number of generated rows/items",
             "- do not emit JSON objects, JSON arrays, markdown, or prose",
             "- required and optional fields must be emitted; do not omit fields",
+            "- quote general strings containing colon, comma, brackets, braces, or backslash",
+            "- date/time, URL, email, and ID strings may be unquoted when they are a single scalar",
             "- use typed empty placeholders when value is missing",
             '- string -> ""',
             "- number/integer/boolean -> null",
@@ -621,6 +735,7 @@ class ToonIntelligence:
                     "",
                     "Checklist:",
                     "- every required top-level field is present",
+                    "- every [N] count matches the emitted rows/items",
                     "- list items keep consistent indentation",
                     "- object fields stay nested; they are not JSON strings",
                 ]
@@ -632,23 +747,27 @@ class ToonIntelligence:
         return "\n".join(sections).strip()
 
     @staticmethod
-    def build_adaptive_prompt(model: Type[BaseModel], cfg: ParserConfig = ParserConfig()) -> str:
+    def build_adaptive_prompt(model: Type[BaseModel], cfg: Optional[ParserConfig] = None) -> str:
         return ToonIntelligence.build_schema_aware_prompt(model, cfg, concise=False)
 
     @staticmethod
-    def build_minimal_prompt(model: Type[BaseModel], cfg: ParserConfig = ParserConfig()) -> str:
+    def build_minimal_prompt(model: Type[BaseModel], cfg: Optional[ParserConfig] = None) -> str:
         return ToonIntelligence.build_schema_aware_prompt(model, cfg, concise=True)
 
 
 class ToonParser:
-    _TABULAR_HEADER_RE = re.compile(r"^(?P<name>[A-Za-z0-9_]+)\[(?P<n>\d+),(?:#)?\]\{(?P<cols>[^}]+)\}:\s*$")
-    _SCALAR_LIST_RE = re.compile(r"^(?P<name>[A-Za-z0-9_]+)\[(?P<n>\d+)\]:\s*(?P<body>.*)$")
+    _TABULAR_HEADER_RE = re.compile(
+        r"^(?P<name>[A-Za-z_][A-Za-z0-9_.]*)\[(?P<n>\d+)(?P<delimiter>,|\||\t)?(?:#)?\]\{(?P<cols>[^}]+)\}:\s*$"
+    )
+    _SCALAR_LIST_RE = re.compile(
+        r"^(?P<name>[A-Za-z_][A-Za-z0-9_.]*)\[(?P<n>\d+)(?P<delimiter>\||\t)?\]:\s*(?P<body>.*)$"
+    )
     _INDEXED_ITEM_RE = re.compile(r"^(?P<name>[A-Za-z0-9_]+)\[(?P<idx>\d+)\]:(?:\s*)$")
     _CODE_FENCE_RE = re.compile(r"```(?:json|toon)?\s*(.*?)\s*```", flags=re.DOTALL)
 
-    def __init__(self, model: Type[BaseModel], cfg: ParserConfig = ParserConfig()):
+    def __init__(self, model: Type[BaseModel], cfg: Optional[ParserConfig] = None):
         self.model = model
-        self.cfg = cfg
+        self.cfg = cfg or ParserConfig()
         self.schema = model.model_json_schema()
         self.root_schema = self.schema
         self._defs: Dict[str, Any] = {}
@@ -657,37 +776,27 @@ class ToonParser:
                 self._defs.update(self.root_schema["$defs"])
             if isinstance(self.root_schema.get("definitions"), dict):
                 self._defs.update(self.root_schema["definitions"])
-        self._complexity_metrics = ModelComplexityAnalyzer(model).analyze()
+        analyzer = ModelComplexityAnalyzer(model)
+        self._complexity_metrics = analyzer.analyze()
+        self._mode_decision = analyzer.mode_decision(self.cfg)
         self._effective_mode, self._mode_reason = self._select_mode()
         if self.cfg.instructions_mode == "minimal":
             self._validate_minimal_mode_compatibility()
 
     def _select_mode(self) -> Tuple[str, str]:
         requested = self.cfg.instructions_mode
-        analyzer = ModelComplexityAnalyzer(self.model)
-        recommended = analyzer.recommended_mode()
-        metrics = analyzer.metrics
 
         if requested == "json":
             return "json", "explicit json mode"
         if requested == "minimal":
             return "minimal", "explicit minimal mode"
-        if recommended == "json":
-            reason_bits: List[str] = []
-            if metrics.has_recursive_refs:
-                reason_bits.append("recursive refs")
-            if metrics.has_dynamic_object_keys:
-                reason_bits.append("dynamic object keys")
-            if metrics.has_nested_unions or metrics.has_union_inside_array:
-                reason_bits.append("nested unions")
-            if metrics.has_array_of_arrays:
-                reason_bits.append("array-of-arrays")
-            if metrics.max_nesting_depth >= 4:
-                reason_bits.append(f"depth={metrics.max_nesting_depth}")
-            if metrics.largest_list_object_width >= 8:
-                reason_bits.append(f"wide list objects={metrics.largest_list_object_width}")
+        decision = self._mode_decision
+        if decision["mode"] == "json":
+            reason_bits = list(decision["hard_reasons"])
+            if not reason_bits:
+                reason_bits = list(decision["soft_reasons"])
             return "json", ", ".join(reason_bits) or "schema too complex for TOON"
-        return "adaptive", "schema is TOON-compatible"
+        return "toon", "schema is TOON-compatible"
 
     def _validate_minimal_mode_compatibility(self) -> None:
         limits = ComplexityLimits(
@@ -725,6 +834,11 @@ class ToonParser:
 
     def get_mode_reason(self) -> str:
         return self._mode_reason
+
+    def get_mode_decision(self) -> Dict[str, Any]:
+        decision = dict(self._mode_decision)
+        decision["mode"] = self._effective_mode
+        return decision
 
     def get_format_instructions(self) -> str:
         if self._effective_mode == "minimal":
@@ -795,7 +909,7 @@ class ToonParser:
                 json_text = json_callback(json_prompt)
                 return self._validate_model(self._decode_json(json_text))
 
-            raise repaired_error
+            raise repaired_error from first_error
 
     def decode(self, text: str) -> Dict[str, Any]:
         return self._decode_to_obj(text)
@@ -874,6 +988,61 @@ class ToonParser:
             raise ToonParserError("Tabs are not allowed. Use spaces only.")
         return indent
 
+    def _default_delimiter(self) -> str:
+        return {"comma": ",", "pipe": "|", "tab": "\t"}[self.cfg.delimiter]
+
+    def _delimiter_from_header(self, raw: Optional[str]) -> str:
+        if raw is None:
+            return ","
+        if raw == ",":
+            if not self.cfg.compat_legacy_headers:
+                raise ToonDecodeError("Legacy explicit comma headers like [N,] are disabled")
+            return ","
+        if raw == "|":
+            return "|"
+        if raw == "\t":
+            return "\t"
+        raise ToonDecodeError(f"Unsupported TOON delimiter: {raw!r}")
+
+    def _split_delimited(self, row_line: str, delimiter: str) -> List[str]:
+        values: List[str] = []
+        buf: List[str] = []
+        quote: Optional[str] = None
+        escaped = False
+        for ch in row_line:
+            if escaped:
+                buf.append("\\" + ch)
+                escaped = False
+                continue
+            if quote and ch == "\\":
+                escaped = True
+                continue
+            if quote:
+                buf.append(ch)
+                if ch == quote:
+                    quote = None
+                continue
+            if ch in ('"', "'"):
+                quote = ch
+                buf.append(ch)
+                continue
+            if ch == delimiter:
+                values.append("".join(buf).strip())
+                buf = []
+                continue
+            buf.append(ch)
+        if escaped:
+            buf.append("\\")
+        if quote:
+            raise ToonDecodeError("Unterminated quoted string in delimited row")
+        values.append("".join(buf).strip())
+        return values
+
+    def _expand_paths_enabled(self) -> bool:
+        if self.cfg.allow_dotted_paths is not None:
+            return self.cfg.allow_dotted_paths
+        return self.cfg.expand_paths == "safe"
+
     def _split_kv(self, stripped: str) -> Tuple[str, Optional[str]]:
         if ":" not in stripped:
             raise ToonParserError(f"Every TOON line must contain ':': {stripped!r}")
@@ -884,7 +1053,109 @@ class ToonParser:
         value = value.strip()
         return key, value if value != "" else None
 
-    def _parse_scalar(self, raw: str, expected_schema: Optional[Dict[str, Any]] = None) -> Any:
+    def _unquote_string(self, value: str) -> str:
+        if len(value) < 2 or value[0] != value[-1] or value[0] not in ('"', "'"):
+            return value
+        quote = value[0]
+        body = value[1:-1]
+        out: List[str] = []
+        i = 0
+        escapes = {"\\": "\\", '"': '"', "n": "\n", "r": "\r", "t": "\t"}
+        if quote == "'":
+            escapes["'"] = "'"
+        while i < len(body):
+            ch = body[i]
+            if ch != "\\":
+                out.append(ch)
+                i += 1
+                continue
+            if i + 1 >= len(body):
+                raise ToonDecodeError("Invalid trailing escape in quoted string")
+            esc = body[i + 1]
+            if esc not in escapes:
+                raise ToonDecodeError(f"Invalid escape sequence: \\{esc}")
+            out.append(escapes[esc])
+            i += 2
+        return "".join(out)
+
+    def _string_schema_text(self, expected_schema: Optional[Dict[str, Any]]) -> str:
+        schema = expected_schema or {}
+        parts: List[str] = []
+        for key in ("title", "description"):
+            raw = schema.get(key)
+            if isinstance(raw, str):
+                parts.append(raw)
+        return " ".join(parts).lower()
+
+    def _schema_hints_safe_scalar_string(self, expected_schema: Optional[Dict[str, Any]]) -> bool:
+        text = self._string_schema_text(expected_schema)
+        if not text:
+            return False
+        safe_terms = (
+            "date",
+            "time",
+            "datetime",
+            "timestamp",
+            "url",
+            "uri",
+            "email",
+            "id",
+            "identifier",
+            "timezone",
+            "time zone",
+        )
+        return any(term in text for term in safe_terms)
+
+    def _is_safe_unquoted_scalar_string(self, value: str, expected_schema: Optional[Dict[str, Any]]) -> bool:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?)?", value):
+            return True
+        if re.fullmatch(r"\d{4}/\d{2}/\d{2}", value):
+            return True
+        if re.fullmatch(r"\d{2}:\d{2}(?::\d{2})?", value):
+            return True
+        if re.fullmatch(r"(?:UTC|GMT)?[+-]\d{2}:?\d{2}|[A-Z]{2,5}", value):
+            return True
+        if re.fullmatch(r"https?://[^\s\[\]{}\\]+", value):
+            return True
+        if re.fullmatch(r"[^@\s\[\]{}\\]+@[^@\s\[\]{}\\]+\.[^@\s\[\]{}\\]+", value):
+            return True
+        if re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", value):
+            return True
+        if self._schema_hints_safe_scalar_string(expected_schema) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:/+-]*", value):
+            return True
+        return False
+
+    def _unquoted_string_requires_quotes(
+        self,
+        value: str,
+        delimiter: str,
+        expected_schema: Optional[Dict[str, Any]],
+    ) -> bool:
+        if self.cfg.string_safety == "permissive":
+            return any(ch in value for ch in ("\\", "\n", "\r", "\t", "[", "]", "{", "}"))
+        if value == "":
+            return True
+        if value != value.strip():
+            return True
+        if value in {"true", "false", "null"}:
+            return True
+        if value == "-" or value.startswith("-"):
+            return True
+        if re.fullmatch(r"[-+]?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][-+]?\d+)?", value):
+            return True
+        dangerous = any(ch in value for ch in ('"', "\\", "[", "]", "{", "}", "\n", "\r", "\t", delimiter))
+        if dangerous:
+            return True
+        if self.cfg.string_safety == "smart" and ":" in value:
+            return not self._is_safe_unquoted_scalar_string(value, expected_schema)
+        return self.cfg.string_safety == "strict" and ":" in value
+
+    def _parse_scalar(
+        self,
+        raw: str,
+        expected_schema: Optional[Dict[str, Any]] = None,
+        delimiter: str = ",",
+    ) -> Any:
         value = raw.strip()
         if value == "null":
             return None
@@ -892,36 +1163,43 @@ class ToonParser:
             return {}
         if value == "[]":
             return []
-        if len(value) >= 2 and ((value[0] == value[-1] == '"') or (value[0] == value[-1] == "'")):
-            value = value[1:-1]
+        is_quoted = len(value) >= 2 and (
+            (value[0] == value[-1] == '"') or (value[0] == value[-1] == "'")
+        )
+        if is_quoted:
+            value = self._unquote_string(value)
 
         expected_type = (expected_schema or {}).get("type")
         if expected_type == "array":
             items_schema = self._resolve_nullable((expected_schema or {}).get("items", {}) or {})
             item_type = (items_schema or {}).get("type")
             if item_type in ("string", "integer", "number", "boolean", None):
-                parts = [part.strip() for part in self._csv_row(value)]
+                parts = self._split_delimited(value, delimiter)
                 parts = [part for part in parts if part != ""]
                 if not parts:
                     return []
-                return [self._parse_scalar(part, items_schema) for part in parts]
+                return [self._parse_scalar(part, items_schema, delimiter) for part in parts]
             if item_type == "object" and self.cfg.coerce_object_list_from_inline_scalars:
                 object_key = self._best_inline_object_key(items_schema)
                 if object_key is None:
                     raise ToonParserError(
                         "Inline scalar value cannot be coerced to list[object]. Use dash list notation."
                     )
-                parts = [part.strip() for part in self._csv_row(value)]
+                parts = self._split_delimited(value, delimiter)
                 parts = [part for part in parts if part != ""]
                 if not parts:
                     return []
                 key_schema = self._resolve_nullable((items_schema.get("properties", {}) or {}).get(object_key))
-                return [{object_key: self._parse_scalar(part, key_schema)} for part in parts]
+                return [{object_key: self._parse_scalar(part, key_schema, delimiter)} for part in parts]
             raise ToonParserError(
                 "Inline scalar value cannot be coerced to list[object]. Use dash list notation."
             )
 
+        if is_quoted:
+            return value
         if expected_type == "string" and self.cfg.protect_string_ids:
+            if self._unquoted_string_requires_quotes(value, delimiter, expected_schema):
+                raise ToonDecodeError(f"String value must be quoted: {raw!r}")
             return value
         if value.lower() in ("true", "false"):
             return value.lower() == "true"
@@ -1039,12 +1317,16 @@ class ToonParser:
         allow_additional: bool,
         path: str,
     ) -> bool:
-        if "." not in dotted_key or not self.cfg.allow_dotted_paths:
+        if "." not in dotted_key or not self._expand_paths_enabled():
             return False
 
         segments = [seg.strip() for seg in dotted_key.split(".") if seg.strip()]
         if len(segments) < 2:
             return False
+        if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", seg) for seg in segments):
+            raise ToonDecodeError(f"Unsafe dotted path '{dotted_key}' at {path}")
+        if segments[0] in out and not isinstance(out[segments[0]], dict):
+            raise ToonParserError(f"Cannot expand dotted path '{dotted_key}' because {path}.{segments[0]} already exists")
 
         current_out = out
         current_props = props
@@ -1118,18 +1400,19 @@ class ToonParser:
             if scalar_list_match:
                 field_name = scalar_list_match.group("name")
                 expected_count = int(scalar_list_match.group("n"))
+                delimiter = self._delimiter_from_header(scalar_list_match.group("delimiter"))
                 body = scalar_list_match.group("body")
                 field_schema = self._resolve_nullable(props.get(field_name))
                 if field_schema is None and not allow_additional and self.cfg.strict_schema:
                     raise SchemaViolationError(f"Unknown field '{field_name}' at {path}")
                 items_schema = (field_schema or {}).get("items", {}) if (field_schema or {}).get("type") == "array" else None
-                parts = [part.strip() for part in body.split(",")] if body else []
+                parts = self._split_delimited(body, delimiter) if body else []
                 parts = [part for part in parts if part != ""]
                 if self.cfg.strict_count and len(parts) != expected_count:
                     raise SchemaViolationError(
                         f"{path}.{field_name}: expected {expected_count} items, got {len(parts)}"
                     )
-                out[field_name] = [self._parse_scalar(part, items_schema) for part in parts]
+                out[field_name] = [self._parse_scalar(part, items_schema, delimiter) for part in parts]
                 i += 1
                 continue
 
@@ -1331,7 +1614,8 @@ class ToonParser:
         match = self._TABULAR_HEADER_RE.match(header)
         assert match
         expected_rows = int(match.group("n"))
-        columns = [column.strip() for column in match.group("cols").split(",") if column.strip()]
+        delimiter = self._delimiter_from_header(match.group("delimiter"))
+        columns = [column.strip() for column in self._split_delimited(match.group("cols"), delimiter) if column.strip()]
 
         field_schema = field_schema or {}
         if field_schema.get("type") != "array":
@@ -1357,14 +1641,14 @@ class ToonParser:
                 break
             if cur_indent != indent + self.cfg.indent_step:
                 raise ToonParserError(f"{path}: invalid tabular indentation at line {i + 1}")
-            row = self._csv_row(line.strip())
+            row = self._split_delimited(line.strip(), delimiter)
             if len(row) != len(columns):
                 raise SchemaViolationError(
                     f"{path}: expected {len(columns)} tabular columns, got {len(row)} at row {len(out)}"
                 )
             item: Dict[str, Any] = {}
             for idx, column in enumerate(columns):
-                item[column] = self._parse_scalar(row[idx], item_props.get(column))
+                item[column] = self._parse_scalar(row[idx], item_props.get(column), delimiter)
             out.append(item)
             i += 1
             if self.cfg.strict_count and len(out) >= expected_rows:
