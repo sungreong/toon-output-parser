@@ -2,7 +2,7 @@
 
 A structured output parser for Pydantic models that accepts compact TOON text and validates it into typed objects.
 
-[한국어 README](README.ko.md)
+[한국어 README](README.kr.md)
 
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![LangChain](https://img.shields.io/badge/LangChain-Integration-green.svg)](https://github.com/langchain-ai/langchain)
@@ -29,7 +29,7 @@ items:
   - name: Item 1
   - name: Item 2
 
-products[2,]{name,price}:
+products[2]{name,price}:
   iPhone 15,1200000
   Galaxy S24,1100000
 ```
@@ -41,9 +41,10 @@ products[2,]{name,price}:
 | Scalars | Yes | `str`, `int`, `float`, `bool`, `None` |
 | Nested objects | Yes | 2-space indentation |
 | Inline scalar list | Yes | `tags[3]: red,green,blue` |
-| Tabular object array | Yes | `items[N,]{f1,f2}:` |
-| Dot notation | Yes (default) | Example: `details.summary: concise` |
-| Dot notation disabled mode | Yes | Set `ParserConfig(allow_dotted_paths=False)` |
+| Tabular object array | Yes | `items[N]{f1,f2}:` |
+| Delimiters | Yes | Comma default, pipe and tab in tabular headers |
+| Safe path expansion | Opt-in | Set `ParserConfig(expand_paths="safe")` |
+| Smart string safety | Yes | Date/time, URL, email, and ID strings may be unquoted |
 | Recursive schema handling | Auto fallback | `adaptive` mode routes recursive models to JSON mode |
 
 ## Installation
@@ -74,6 +75,15 @@ class UserInfo(BaseModel):
 
 parser = ToonOutputParser(model=UserInfo)
 result = parser.parse("name: John\nage: 25\nhobbies[2]: soccer,coding")
+```
+
+Smart string handling:
+
+```toon
+document_id: INS-2026-0001
+extraction_date: 2026-04-24 12:40:15
+url: https://example.com/a:b
+note: "key: value"
 ```
 
 ## What To Run For Testing
@@ -121,9 +131,14 @@ result = chain.invoke(
 ## Modes and Constraints
 
 - Default mode is `adaptive`.
-- In `adaptive`, recursive/high-complexity schemas can be switched to JSON mode for stability.
+- In `adaptive`, hard-risk schemas switch to JSON mode. Soft risks stay in TOON by default.
+- `get_effective_mode()` returns the actual runtime mode: `toon`, `minimal`, or `json`.
+- `ParserConfig(fallback_policy="toon_first" | "balanced" | "safe")` controls how aggressively soft risks fall back to JSON.
+- `get_mode_decision()` exposes hard reasons, soft reasons, risk score, and schema metrics.
+- `ParserConfig(string_safety="smart")` is the default. It accepts safe scalar strings such as dates, times, URLs, emails, time zones, and IDs without quotes, while still requiring quotes for ambiguous free text such as `note: "key: value"`.
 - `minimal` mode applies stricter complexity validation.
-- TOON remains indentation-sensitive; malformed indentation and schema-incompatible shapes will fail validation.
+- TOON remains indentation-sensitive; malformed indentation, count mismatches, and schema-incompatible shapes will fail validation.
+- This package targets official TOON core compatibility for LLM structured extraction. It intentionally falls back to JSON for schemas that are risky or inefficient in TOON.
 
 ## Experimental Status
 

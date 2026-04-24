@@ -29,7 +29,7 @@ items:
   - name: Item 1
   - name: Item 2
 
-products[2,]{name,price}:
+products[2]{name,price}:
   iPhone 15,1200000
   Galaxy S24,1100000
 ```
@@ -41,9 +41,10 @@ products[2,]{name,price}:
 | 스칼라 | Yes | `str`, `int`, `float`, `bool`, `None` |
 | 중첩 객체 | Yes | 2칸 들여쓰기 |
 | 인라인 스칼라 리스트 | Yes | `tags[3]: red,green,blue` |
-| 테이블형 객체 배열 | Yes | `items[N,]{f1,f2}:` |
-| Dot notation | Yes (기본) | 예: `details.summary: concise` |
-| Dot notation 비활성화 | Yes | `ParserConfig(allow_dotted_paths=False)` |
+| 테이블형 객체 배열 | Yes | `items[N]{f1,f2}:` |
+| 구분자 | Yes | comma 기본, tabular header의 pipe/tab 지원 |
+| 안전한 경로 확장 | Opt-in | `ParserConfig(expand_paths="safe")` |
+| 스마트 문자열 안전성 | Yes | 날짜/시간, URL, 이메일, ID 문자열은 quote 없이 허용 |
 | 재귀 스키마 처리 | Auto fallback | `adaptive`에서 JSON 모드로 자동 전환 |
 
 ## 설치
@@ -74,6 +75,15 @@ class UserInfo(BaseModel):
 
 parser = ToonOutputParser(model=UserInfo)
 result = parser.parse("name: John\nage: 25\nhobbies[2]: soccer,coding")
+```
+
+스마트 문자열 처리:
+
+```toon
+document_id: INS-2026-0001
+extraction_date: 2026-04-24 12:40:15
+url: https://example.com/a:b
+note: "key: value"
 ```
 
 ## 테스트할 때 실행할 스크립트
@@ -121,9 +131,14 @@ result = chain.invoke(
 ## 모드 및 제약
 
 - 기본 모드는 `adaptive`입니다.
-- `adaptive`에서는 재귀/고복잡 스키마를 안정성을 위해 JSON 모드로 전환할 수 있습니다.
+- `adaptive`에서는 hard-risk 스키마를 JSON 모드로 전환합니다. depth/width 같은 soft-risk는 기본적으로 TOON에 남깁니다.
+- `get_effective_mode()`는 실제 런타임 모드인 `toon`, `minimal`, `json` 중 하나를 반환합니다.
+- `ParserConfig(fallback_policy="toon_first" | "balanced" | "safe")`로 soft-risk를 얼마나 적극적으로 JSON fallback할지 조절합니다.
+- `get_mode_decision()`은 hard reason, soft reason, risk score, schema metrics를 반환합니다.
+- 기본 문자열 정책은 `ParserConfig(string_safety="smart")`입니다. 날짜/시간, URL, 이메일, 타임존, ID 같은 안전한 scalar 문자열은 quote 없이 허용하고, `note: "key: value"`처럼 모호한 일반 텍스트는 quote를 요구합니다.
 - `minimal` 모드는 더 엄격한 복잡도 검증을 적용합니다.
-- TOON은 들여쓰기 민감 포맷이므로, 들여쓰기 오류나 스키마 불일치 구조는 검증에 실패합니다.
+- TOON은 들여쓰기 민감 포맷이므로, 들여쓰기 오류, 개수 불일치, 스키마 불일치 구조는 검증에 실패합니다.
+- 이 패키지는 LLM 구조화 추출에 필요한 공식 TOON 핵심 호환성을 목표로 하며, TOON으로 생성하기 위험하거나 비효율적인 스키마는 JSON으로 폴백합니다.
 
 ## Experimental 상태
 
